@@ -14,6 +14,8 @@ const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 
 function getClientIp(req: NextRequest): string {
+  const platformIp = (req as unknown as { ip?: string }).ip;
+  if (platformIp) return platformIp;
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) {
     const ips = forwarded.split(",").map((s) => s.trim()).filter(Boolean);
@@ -146,11 +148,7 @@ export async function POST(req: NextRequest) {
   const { action, sessionId } = await req.json();
 
   if (action === "delete" && sessionId) {
-    await prisma.message.deleteMany({ where: { sessionId } });
-    await prisma.summary.deleteMany({ where: { sessionId } });
-    await prisma.note.deleteMany({ where: { sessionId } });
-    await prisma.rateLimit.deleteMany({ where: { sessionId } });
-    await prisma.spamLock.deleteMany({ where: { sessionId } });
+    // Cascading deletes handle messages, summary, notes, rateLimit, spamLock, injectionLogs
     await prisma.session.delete({ where: { id: sessionId } }).catch(() => {});
     return Response.json({ ok: true });
   }

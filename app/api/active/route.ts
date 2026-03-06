@@ -6,6 +6,8 @@ const ACTIVE_RATE_WINDOW_MS = 30 * 1000;
 const activeRateMap = new Map<string, number>();
 
 function getClientIp(req: NextRequest): string {
+  const platformIp = (req as unknown as { ip?: string }).ip;
+  if (platformIp) return platformIp;
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) {
     const ips = forwarded.split(",").map((s) => s.trim()).filter(Boolean);

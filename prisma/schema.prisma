@@ -7,19 +7,21 @@ datasource db {
 }
 
 model Session {
-  id        String     @id
-  createdAt DateTime   @default(now())
-  lastActiveAt DateTime @default(now())
-  messages  Message[]
-  summary   Summary?
-  rateLimit RateLimit?
-  spamLock  SpamLock?
+  id          String         @id
+  createdAt   DateTime       @default(now())
+  lastActiveAt DateTime      @default(now())
+  messages    Message[]
+  summary     Summary?
+  rateLimit   RateLimit?
+  spamLock    SpamLock?
+  notes       Note[]
+  injectionLogs InjectionLog[]
 }
 
 model SpamLock {
   id        String   @id @default(cuid())
   sessionId String   @unique
-  session   Session  @relation(fields: [sessionId], references: [id])
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   lockedAt  DateTime @default(now())
   expiresAt DateTime
 }
@@ -27,7 +29,7 @@ model SpamLock {
 model RateLimit {
   id          String   @id @default(cuid())
   sessionId   String   @unique
-  session     Session  @relation(fields: [sessionId], references: [id])
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   count       Int      @default(0)
   windowStart DateTime @default(now())
 }
@@ -35,7 +37,7 @@ model RateLimit {
 model Message {
   id            String   @id @default(cuid())
   sessionId     String
-  session       Session  @relation(fields: [sessionId], references: [id])
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   role          String
   content       String
   imageData     String?
@@ -46,7 +48,7 @@ model Message {
 model Summary {
   id        String   @id @default(cuid())
   sessionId String   @unique
-  session   Session  @relation(fields: [sessionId], references: [id])
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   content   String
   themes    String
   userName  String?
@@ -61,8 +63,17 @@ model AdminLoginAttempt {
   updatedAt DateTime  @updatedAt
 }
 
+model IpRateLimit {
+  id          String   @id @default(cuid())
+  ip          String   @unique
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+}
+
 model InjectionLog {
   id             String   @id @default(cuid())
+  sessionId      String
+  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sessionShortId String
   content        String
   createdAt      DateTime @default(now())
@@ -71,6 +82,7 @@ model InjectionLog {
 model Note {
   id            String   @id @default(cuid())
   sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   authorName    String
   content       String
   emotionalTags String

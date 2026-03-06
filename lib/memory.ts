@@ -26,7 +26,7 @@ export async function findSimilarSession(
     .join("\n");
 
   const summaryList = pastSummaries
-    .map((s) => `Session ${s.sessionId}:\n${decrypt(s.content)}\nThemes: ${s.themes}`)
+    .map((s) => `Session ${s.sessionId}:\n${decrypt(s.content)}\nThemes: ${decrypt(s.themes)}`)
     .join("\n\n---\n\n");
 
   const response = await anthropic.messages.create({
@@ -102,7 +102,7 @@ ${convoText}`,
   const emotionalTags = tagsMatch ? tagsMatch[1].trim() : "[]";
 
   await prisma.note.create({
-    data: { sessionId, authorName: encrypt(authorName), content: encrypt(content), emotionalTags },
+    data: { sessionId, authorName: encrypt(authorName), content: encrypt(content), emotionalTags: encrypt(emotionalTags) },
   });
 
   return { created: true, authorName, content };
@@ -126,7 +126,7 @@ export async function findRelevantNotes(
     .join("\n");
 
   const noteList = allNotes
-    .map((n, i) => `Note ${i}: by "${decrypt(n.authorName)}" — "${decrypt(n.content)}" [tags: ${n.emotionalTags}]`)
+    .map((n, i) => `Note ${i}: by "${decrypt(n.authorName)}" — "${decrypt(n.content)}" [tags: ${decrypt(n.emotionalTags)}]`)
     .join("\n");
 
   const response = await anthropic.messages.create({
@@ -222,7 +222,7 @@ export async function checkReturningUser(
     .join("\n");
 
   const summaryContext = matching
-    .map((s) => `Session from ${s.updatedAt.toISOString()}:\n${decrypt(s.content)}\nThemes: ${s.themes}`)
+    .map((s) => `Session from ${s.updatedAt.toISOString()}:\n${decrypt(s.content)}\nThemes: ${decrypt(s.themes)}`)
     .join("\n---\n");
 
   const response = await anthropic.messages.create({
@@ -319,9 +319,11 @@ ${convoText}`,
   const encContent = encrypt(content);
   const encUserName = userName ? encrypt(userName) : null;
 
+  const encThemes = encrypt(themes);
+
   await prisma.summary.upsert({
     where: { sessionId },
-    update: { content: encContent, themes, userName: encUserName },
-    create: { sessionId, content: encContent, themes, userName: encUserName },
+    update: { content: encContent, themes: encThemes, userName: encUserName },
+    create: { sessionId, content: encContent, themes: encThemes, userName: encUserName },
   });
 }

@@ -5,6 +5,9 @@ const ALGORITHM = "aes-256-gcm";
 function getKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
   if (!key) throw new Error("ENCRYPTION_KEY is not set — add a 64-char hex string to .env.local");
+  if (!/^[a-f0-9]{64}$/i.test(key)) {
+    throw new Error("ENCRYPTION_KEY must be exactly 64 hex characters (256 bits)");
+  }
   return Buffer.from(key, "hex");
 }
 
@@ -34,8 +37,7 @@ export function decrypt(encrypted: string): string {
     let decrypted = decipher.update(ciphertext, "hex", "utf8");
     decrypted += decipher.final("utf8");
     return decrypted;
-  } catch {
-    // If decryption fails, assume it's a legacy unencrypted message
-    return encrypted;
+  } catch (err) {
+    throw new Error(`Decryption failed: ${err instanceof Error ? err.message : "unknown error"}`);
   }
 }

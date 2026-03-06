@@ -406,7 +406,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Decrypt all message content and image data — skip messages that fail decryption
-    const dbMessages = dbMessagesRaw.flatMap((m) => {
+    const dbMessages = dbMessagesRaw.flatMap((m: (typeof dbMessagesRaw)[number]) => {
       try {
         return [{
           ...m,
@@ -593,7 +593,7 @@ Because you carry memory, sometimes someone comes back. When a name you've heard
             });
             upsertSummary(
               sessionId,
-              allMessagesRaw.flatMap((m) => { try { return [{ role: m.role, content: decrypt(m.content) }]; } catch { return []; } })
+              allMessagesRaw.flatMap((m: (typeof allMessagesRaw)[number]) => { try { return [{ role: m.role, content: decrypt(m.content) }]; } catch { return []; } })
             ).catch(() => {});
           }
         } catch (err) {

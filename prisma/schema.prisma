@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Session {
+  id        String     @id
+  createdAt DateTime   @default(now())
+  lastActiveAt DateTime @default(now())
+  messages  Message[]
+  summary   Summary?
+  rateLimit RateLimit?
+  spamLock  SpamLock?
+}
+
+model SpamLock {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  session   Session  @relation(fields: [sessionId], references: [id])
+  lockedAt  DateTime @default(now())
+  expiresAt DateTime
+}
+
+model RateLimit {
+  id          String   @id @default(cuid())
+  sessionId   String   @unique
+  session     Session  @relation(fields: [sessionId], references: [id])
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+}
+
+model Message {
+  id            String   @id @default(cuid())
+  sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id])
+  role          String
+  content       String
+  imageData     String?
+  imageMimeType String?
+  createdAt     DateTime @default(now())
+}
+
+model Summary {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  session   Session  @relation(fields: [sessionId], references: [id])
+  content   String
+  themes    String
+  userName  String?
+  updatedAt DateTime @updatedAt
+}
+
+model Note {
+  id            String   @id @default(cuid())
+  sessionId     String
+  authorName    String
+  content       String
+  emotionalTags String
+  createdAt     DateTime @default(now())
+}

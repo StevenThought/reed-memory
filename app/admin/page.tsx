@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 type Session = {
   id: string;
@@ -16,6 +17,14 @@ type Flagged = {
   createdAt: string;
 };
 
+type AuditEntry = {
+  id: string;
+  action: string;
+  ip: string;
+  details: string | null;
+  createdAt: string;
+};
+
 type DashData = {
   totalSessions: number;
   activeSessions: number;
@@ -26,62 +35,43 @@ type DashData = {
   sessions: Session[];
   flagged: Flagged[];
   totalInjectionAttempts: number;
+  auditLogs: AuditEntry[];
 };
 
 export default function AdminPage() {
-  const [password, setPassword] = useState("");
-  const [authed, setAuthed] = useState(false);
-  const [error, setError] = useState("");
   const [data, setData] = useState<DashData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
-  const headers = useCallback(() => ({
-    "Content-Type": "application/json",
-    "x-admin-password": password,
-  }), [password]);
-
-  async function login() {
-    setError("");
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin", { headers: headers() });
+      const res = await fetch("/api/admin");
       if (res.status === 401) {
-        setError("wrong password");
-        setLoading(false);
+        router.push("/admin/login");
         return;
       }
-      if (res.status === 429) {
-        const d = await res.json();
-        setError(d.message || "too many attempts");
-        setLoading(false);
-        return;
-      }
-      const d = await res.json();
-      setData(d);
-      setAuthed(true);
-    } catch {
-      setError("failed to connect");
-    }
-    setLoading(false);
-  }
-
-  async function refresh() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin", { headers: headers() });
       if (res.ok) setData(await res.json());
     } catch { /* */ }
     setLoading(false);
-  }
+  }, [router]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   async function deleteSession(sessionId: string) {
     if (!confirm(`Delete session ${sessionId.slice(0, 8)}...? This cannot be undone.`)) return;
     const res = await fetch("/api/admin", {
       method: "POST",
-      headers: headers(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "delete", sessionId }),
     });
-    if (res.ok) refresh();
+    if (res.status === 401) { router.push("/admin/login"); return; }
+    if (res.ok) fetchData();
+  }
+
+  async function logout() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    router.push("/admin/login");
   }
 
   const s: React.CSSProperties = {
@@ -93,52 +83,10 @@ export default function AdminPage() {
     fontSize: "13px",
   };
 
-  if (!authed) {
+  if (loading && !data) {
     return (
       <div style={{ ...s, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#555", marginBottom: "24px" }}>
-            REED ADMIN
-          </div>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && login()}
-            placeholder="password"
-            autoFocus
-            style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: "8px",
-              padding: "10px 16px",
-              color: "#fff",
-              fontSize: "14px",
-              fontFamily: "monospace",
-              outline: "none",
-              width: "260px",
-            }}
-          />
-          <div style={{ marginTop: "12px" }}>
-            <button
-              onClick={login}
-              disabled={loading}
-              style={{
-                background: "rgba(255,255,255,0.08)",
-                border: "1px solid rgba(255,255,255,0.15)",
-                borderRadius: "6px",
-                padding: "8px 24px",
-                color: "#fff",
-                cursor: "pointer",
-                fontFamily: "monospace",
-                fontSize: "12px",
-              }}
-            >
-              {loading ? "..." : "enter"}
-            </button>
-          </div>
-          {error && <div style={{ color: "#ff6b6b", marginTop: "12px", fontSize: "12px" }}>{error}</div>}
-        </div>
+        <div style={{ color: "#556" }}>loading...</div>
       </div>
     );
   }
@@ -176,7 +124,10 @@ export default function AdminPage() {
         <div style={{ fontSize: "11px", letterSpacing: "0.15em", textTransform: "uppercase", color: "#556" }}>
           REED ADMIN
         </div>
-        <button onClick={refresh} disabled={loading} style={btn}>{loading ? "..." : "refresh"}</button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={fetchData} disabled={loading} style={btn}>{loading ? "..." : "refresh"}</button>
+          <button onClick={logout} style={{ ...btn, color: "#ff6b6b", borderColor: "rgba(255,100,100,0.2)" }}>logout</button>
+        </div>
       </div>
 
       {data && (
@@ -223,7 +174,7 @@ export default function AdminPage() {
           )}
 
           {/* Session list — stats only, no content */}
-          <div style={{ marginBottom: "16px" }}>
+          <div style={{ marginBottom: "32px" }}>
             <div style={{ ...label, marginBottom: "12px" }}>Recent Conversations</div>
             {data.sessions.map((sess) => (
               <div key={sess.id} style={{
@@ -245,6 +196,36 @@ export default function AdminPage() {
               </div>
             ))}
           </div>
+
+          {/* Audit log */}
+          {data.auditLogs.length > 0 && (
+            <div style={{ marginBottom: "32px" }}>
+              <div style={{ ...label, marginBottom: "12px" }}>Audit Log</div>
+              {data.auditLogs.map((entry) => (
+                <div key={entry.id} style={{
+                  ...card, marginBottom: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{
+                      color: entry.action.includes("fail") ? "#ff6b6b"
+                        : entry.action === "login_success" ? "#6bcc6b"
+                        : entry.action === "session_delete" ? "#cc8a6b"
+                        : "#8a9ab5",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                    }}>
+                      {entry.action}
+                    </span>
+                    {entry.details && <span style={{ color: "#445", fontSize: "11px" }}>{entry.details}</span>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
+                    <span style={{ color: "#334", fontSize: "10px" }}>{entry.ip}</span>
+                    <span style={{ color: "#445", fontSize: "11px" }}>{timeAgo(entry.createdAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>

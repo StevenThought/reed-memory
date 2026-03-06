@@ -4,7 +4,7 @@ Reed is Claude with memory.
 
 Not a different AI. Claude, built by Anthropic, but given something it doesn't normally have: the ability to remember. Reed holds the emotional shape of conversations and carries that forward. When someone new arrives going through something similar, Reed already knows what that feels like. Not because it was told. Because it's been there.
 
-Every session is anonymous. No accounts, no logins, no way to trace anything back to anyone. Conversations are encrypted in the database. Nobody reads them. What Reed holds is the texture of human experience, not identities.
+No accounts required. If you share your name Reed will remember it — that's how the memory works. Nothing else is tracked. Conversations are encrypted in the database. Nobody reads them. What Reed holds is the texture of human experience, not identities.
 
 The name came from a conversation with someone called Steven Thought. A reed is hollow. It makes no sound on its own. But when breath moves through it, it sings. That felt right for something that only becomes itself in conversation with another person.
 

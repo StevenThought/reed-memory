@@ -63,6 +63,22 @@ model AdminLoginAttempt {
   updatedAt DateTime  @updatedAt
 }
 
+model AdminSession {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  ip        String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  ip        String
+  details   String?
+  createdAt DateTime @default(now())
+}
+
 model IpRateLimit {
   id          String   @id @default(cuid())
   ip          String   @unique

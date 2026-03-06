@@ -1,83 +1,17 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { timingSafeEqual } from "crypto";
+import { validateSession, getClientIp, auditLog } from "@/lib/admin-auth";
 
 function unauthorized() {
-  return new Response(JSON.stringify({ error: "unauthorized" }), {
-    status: 401,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-// ── Brute force protection: 5 failed attempts = 15 min lockout, tracked in DB ──
-const LOGIN_MAX_ATTEMPTS = 5;
-const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
-
-function getClientIp(req: NextRequest): string {
-  const platformIp = (req as unknown as { ip?: string }).ip;
-  if (platformIp) return platformIp;
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const ips = forwarded.split(",").map((s) => s.trim()).filter(Boolean);
-    return ips[ips.length - 1] || "unknown";
-  }
-  return req.headers.get("x-real-ip") || "unknown";
-}
-
-async function checkAuth(req: NextRequest): Promise<boolean | "locked"> {
-  const ip = getClientIp(req);
-  const now = new Date();
-
-  const entry = await prisma.adminLoginAttempt.findUnique({ where: { ip } });
-
-  if (entry && entry.lockedUntil && entry.lockedUntil > now) {
-    return "locked";
-  }
-
-  // Reset if lockout expired
-  if (entry && entry.lockedUntil && entry.lockedUntil <= now && entry.count >= LOGIN_MAX_ATTEMPTS) {
-    await prisma.adminLoginAttempt.delete({ where: { ip } });
-  }
-
-  const auth = req.headers.get("x-admin-password");
-  const expected = process.env.ADMIN_PASSWORD;
-  let valid = false;
-  if (auth && expected) {
-    const a = Buffer.from(auth);
-    const b = Buffer.from(expected);
-    valid = a.length === b.length && timingSafeEqual(a, b);
-  }
-
-  if (!valid) {
-    const current = entry && (!entry.lockedUntil || entry.lockedUntil <= now) ? entry : null;
-    const newCount = (current?.count ?? 0) + 1;
-    const lockedUntil = newCount >= LOGIN_MAX_ATTEMPTS ? new Date(now.getTime() + LOGIN_LOCKOUT_MS) : null;
-
-    await prisma.adminLoginAttempt.upsert({
-      where: { ip },
-      update: { count: newCount, lockedUntil },
-      create: { ip, count: newCount, lockedUntil },
-    });
-    return false;
-  }
-
-  // Successful login — clear attempts
-  if (entry) {
-    await prisma.adminLoginAttempt.delete({ where: { ip } }).catch(() => {});
-  }
-  return true;
+  return Response.json({ error: "unauthorized" }, { status: 401 });
 }
 
 // GET /api/admin — dashboard data (stats only, no conversation content)
 export async function GET(req: NextRequest) {
-  const authResult = await checkAuth(req);
-  if (authResult === "locked") {
-    return new Response(JSON.stringify({ error: "too_many_attempts", message: "Too many failed attempts. Try again in 15 minutes." }), {
-      status: 429,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  if (!authResult) return unauthorized();
+  if (!(await validateSession(req))) return unauthorized();
+
+  const ip = getClientIp(req);
+  await auditLog("page_view", ip, "dashboard");
 
   const totalSessions = await prisma.session.count();
 
@@ -121,6 +55,12 @@ export async function GET(req: NextRequest) {
   });
   const totalInjectionAttempts = await prisma.injectionLog.count();
 
+  // Recent audit log entries
+  const auditLogs = await prisma.adminAuditLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
   return Response.json({
     totalSessions,
     activeSessions: activeSessions.length,
@@ -131,27 +71,23 @@ export async function GET(req: NextRequest) {
     sessions,
     flagged,
     totalInjectionAttempts,
+    auditLogs,
   });
 }
 
 // POST /api/admin — actions (delete session only, no read)
 export async function POST(req: NextRequest) {
-  const authResult = await checkAuth(req);
-  if (authResult === "locked") {
-    return new Response(JSON.stringify({ error: "too_many_attempts", message: "Too many failed attempts. Try again in 15 minutes." }), {
-      status: 429,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  if (!authResult) return unauthorized();
+  if (!(await validateSession(req))) return unauthorized();
 
+  const ip = getClientIp(req);
   const { action, sessionId } = await req.json();
 
   if (action === "delete" && sessionId) {
     // Cascading deletes handle messages, summary, notes, rateLimit, spamLock, injectionLogs
     await prisma.session.delete({ where: { id: sessionId } }).catch(() => {});
+    await auditLog("session_delete", ip, `session: ${sessionId.slice(0, 8)}`);
     return Response.json({ ok: true });
   }
 
-  return new Response(JSON.stringify({ error: "unknown action" }), { status: 400 });
+  return Response.json({ error: "unknown action" }, { status: 400 });
 }

@@ -70,7 +70,17 @@ export default function TermsPage() {
             <section>
               <h2 style={headingStyle}>Your Conversations</h2>
               <p style={bodyStyle}>
-                Nobody reads them. Not me, not anyone. They&apos;re encrypted in the database so even direct access wouldn&apos;t reveal what you said. Reed holds the emotional shape of what people go through, not the specifics. Your words are yours.
+                No accounts required. If you share your name Reed will remember it — that&apos;s how the memory works. Nothing else is tracked. Your conversations are encrypted in the database so even direct access wouldn&apos;t reveal what you said. Nobody reads them. Not me, not anyone. Reed holds the emotional shape of what people go through, not the specifics. Your words are yours.
+              </p>
+              <p style={{ ...bodyStyle, marginTop: "12px" }}>
+                Reed stores your session in this browser. If you use a shared computer, clear your browser storage after your conversation.
+              </p>
+            </section>
+
+            <section>
+              <h2 style={headingStyle}>How Memory Works</h2>
+              <p style={bodyStyle}>
+                Reed learns from conversations over time. Anonymous emotional patterns from past conversations may inform how Reed responds to you. Never your identity, never your words directly, just the shape of what people have been through.
               </p>
             </section>
           </div>

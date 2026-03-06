@@ -3,7 +3,6 @@
 import "dotenv/config";
 import path from "node:path";
 import { defineConfig } from "prisma/config";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
 
 // Load .env.local manually since dotenv only loads .env
 import { config } from "dotenv";
@@ -16,13 +15,5 @@ export default defineConfig({
   },
   datasource: {
     url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
-  },
-  migrate: {
-    async adapter() {
-      return new PrismaLibSql({
-        url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
-        authToken: process.env.TURSO_AUTH_TOKEN,
-      });
-    },
   },
 });

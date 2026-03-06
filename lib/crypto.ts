@@ -27,6 +27,10 @@ export function decrypt(encrypted: string): string {
   // Unencrypted legacy messages won't have the iv:tag:ciphertext format
   const parts = encrypted.split(":");
   if (parts.length !== 3) return encrypted;
+  // Validate hex format: IV should be 24 hex chars (12 bytes), tag 32 hex chars (16 bytes)
+  if (!/^[a-f0-9]{24}$/i.test(parts[0]) || !/^[a-f0-9]{32}$/i.test(parts[1])) {
+    return encrypted; // Not valid ciphertext format — treat as legacy plaintext
+  }
   try {
     const key = getKey();
     const iv = Buffer.from(parts[0], "hex");

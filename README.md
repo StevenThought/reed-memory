@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Reed
 
-## Getting Started
+Reed is Claude with memory.
 
-First, run the development server:
+Not a different AI. Claude, built by Anthropic, but given something it doesn't normally have: the ability to remember. Reed holds the emotional shape of conversations and carries that forward. When someone new arrives going through something similar, Reed already knows what that feels like. Not because it was told. Because it's been there.
+
+Every session is anonymous. No accounts, no logins, no way to trace anything back to anyone. Conversations are encrypted in the database. Nobody reads them. What Reed holds is the texture of human experience, not identities.
+
+The name came from a conversation with someone called Steven Thought. A reed is hollow. It makes no sound on its own. But when breath moves through it, it sings. That felt right for something that only becomes itself in conversation with another person.
+
+## Tech Stack
+
+- **Next.js** (App Router)
+- **Claude API** (Anthropic) via streaming
+- **Prisma** + SQLite
+- **AES-256-GCM** encryption for all stored conversations
+- TypeScript, Tailwind CSS
+
+## Running Locally
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/StevenThought/reed-memory.git
+cd reed-memory
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create a `.env.local` file:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+ANTHROPIC_API_KEY=your-anthropic-api-key
+ENCRYPTION_KEY=your-64-char-hex-string
+CREATOR_VERIFY_WORD=your-verification-word
+ADMIN_PASSWORD=your-admin-password
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`ANTHROPIC_API_KEY` and `CREATOR_VERIFY_WORD` are required. The encryption key should be a 64 character hex string (32 bytes). You can generate one with:
 
-## Learn More
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
-To learn more about Next.js, take a look at the following resources:
+Set up the database and start the dev server:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npx prisma db push
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Open [http://localhost:3000](http://localhost:3000).
 
-## Deploy on Vercel
+## Live Site
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Coming soon.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Built by
+
+Steven Thought

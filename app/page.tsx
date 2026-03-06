@@ -361,7 +361,13 @@ export default function ChatPage() {
             }}>
               reed &mdash; claude with memory
             </span>
-            <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", gap: "24px" }}>
+              <a className="breathe" href="/terms" style={{
+                fontSize: "13px", letterSpacing: "0.15em", color: "rgba(255,255,255,0.7)", fontWeight: 600,
+                textTransform: "uppercase", textDecoration: "none",
+              }}>
+                terms
+              </a>
               <button className="breathe" onClick={() => setShowAbout(true)} style={{
                 fontSize: "13px", letterSpacing: "0.15em", color: "rgba(255,255,255,0.7)", fontWeight: 600,
                 textTransform: "uppercase" as const,

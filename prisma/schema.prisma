@@ -53,6 +53,13 @@ model Summary {
   updatedAt DateTime @updatedAt
 }
 
+model InjectionLog {
+  id             String   @id @default(cuid())
+  sessionShortId String
+  content        String
+  createdAt      DateTime @default(now())
+}
+
 model Note {
   id            String   @id @default(cuid())
   sessionId     String

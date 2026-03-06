@@ -8,15 +8,11 @@ type Session = {
   createdAt: string;
   lastActiveAt: string;
   messageCount: number;
-  preview: string;
-  lastMessage: string;
-  lastRole: string;
 };
 
 type Flagged = {
   id: string;
   sessionShortId: string;
-  content: string;
   createdAt: string;
 };
 
@@ -29,12 +25,7 @@ type DashData = {
   estimatedCost: number;
   sessions: Session[];
   flagged: Flagged[];
-};
-
-type ChatMessage = {
-  role: string;
-  content: string;
-  createdAt: string;
+  totalInjectionAttempts: number;
 };
 
 export default function AdminPage() {
@@ -42,7 +33,6 @@ export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<DashData | null>(null);
-  const [reading, setReading] = useState<{ id: string; messages: ChatMessage[] } | null>(null);
   const [loading, setLoading] = useState(false);
 
   const headers = useCallback(() => ({
@@ -57,6 +47,12 @@ export default function AdminPage() {
       const res = await fetch("/api/admin", { headers: headers() });
       if (res.status === 401) {
         setError("wrong password");
+        setLoading(false);
+        return;
+      }
+      if (res.status === 429) {
+        const d = await res.json();
+        setError(d.message || "too many attempts");
         setLoading(false);
         return;
       }
@@ -78,18 +74,6 @@ export default function AdminPage() {
     setLoading(false);
   }
 
-  async function readSession(sessionId: string) {
-    const res = await fetch("/api/admin", {
-      method: "POST",
-      headers: headers(),
-      body: JSON.stringify({ action: "read", sessionId }),
-    });
-    if (res.ok) {
-      const d = await res.json();
-      setReading({ id: sessionId, messages: d.messages });
-    }
-  }
-
   async function deleteSession(sessionId: string) {
     if (!confirm(`Delete session ${sessionId.slice(0, 8)}...? This cannot be undone.`)) return;
     const res = await fetch("/api/admin", {
@@ -97,10 +81,7 @@ export default function AdminPage() {
       headers: headers(),
       body: JSON.stringify({ action: "delete", sessionId }),
     });
-    if (res.ok) {
-      refresh();
-      if (reading?.id === sessionId) setReading(null);
-    }
+    if (res.ok) refresh();
   }
 
   const s: React.CSSProperties = {
@@ -220,23 +201,20 @@ export default function AdminPage() {
             </div>
             <div style={card}>
               <div style={label}>Injection Attempts</div>
-              <div style={{ ...stat, color: data.flagged.length > 0 ? "#ff6b6b" : "#fff" }}>{data.flagged.length}</div>
+              <div style={{ ...stat, color: data.totalInjectionAttempts > 0 ? "#ff6b6b" : "#fff" }}>{data.totalInjectionAttempts}</div>
             </div>
           </div>
 
-          {/* Flagged attempts */}
+          {/* Flagged attempts — session and time only, no content */}
           {data.flagged.length > 0 && (
             <div style={{ marginBottom: "32px" }}>
-              <div style={{ ...label, marginBottom: "12px" }}>Flagged Injection Attempts</div>
+              <div style={{ ...label, marginBottom: "12px" }}>Recent Injection Attempts</div>
               {data.flagged.map((f) => (
                 <div key={f.id} style={{
-                  ...card, marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+                  ...card, marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center",
                 }}>
-                  <div>
-                    <span style={{ color: "#ff6b6b", marginRight: "12px" }}>[{f.sessionShortId}...]</span>
-                    <span style={{ color: "#aaa" }}>{f.content}</span>
-                  </div>
-                  <span style={{ color: "#556", fontSize: "11px", flexShrink: 0, marginLeft: "12px" }}>
+                  <span style={{ color: "#ff6b6b" }}>[{f.sessionShortId}...]</span>
+                  <span style={{ color: "#556", fontSize: "11px" }}>
                     {timeAgo(f.createdAt)}
                   </span>
                 </div>
@@ -244,7 +222,7 @@ export default function AdminPage() {
             </div>
           )}
 
-          {/* Session list */}
+          {/* Session list — stats only, no content */}
           <div style={{ marginBottom: "16px" }}>
             <div style={{ ...label, marginBottom: "12px" }}>Recent Conversations</div>
             {data.sessions.map((sess) => (
@@ -253,17 +231,13 @@ export default function AdminPage() {
                 display: "flex", justifyContent: "space-between", alignItems: "center",
               }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "4px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                     <span style={{ color: "#6a8ccc" }}>{sess.shortId}...</span>
                     <span style={{ color: "#556", fontSize: "11px" }}>{sess.messageCount} msgs</span>
                     <span style={{ color: "#445", fontSize: "11px" }}>{timeAgo(sess.lastActiveAt)}</span>
                   </div>
-                  <div style={{ color: "#778", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {sess.preview}
-                  </div>
                 </div>
-                <div style={{ display: "flex", gap: "8px", marginLeft: "16px", flexShrink: 0 }}>
-                  <button onClick={() => readSession(sess.id)} style={btn}>read</button>
+                <div style={{ marginLeft: "16px", flexShrink: 0 }}>
                   <button onClick={() => deleteSession(sess.id)} style={{ ...btn, color: "#ff6b6b", borderColor: "rgba(255,100,100,0.2)" }}>
                     delete
                   </button>
@@ -271,47 +245,6 @@ export default function AdminPage() {
               </div>
             ))}
           </div>
-
-          {/* Read session modal */}
-          {reading && (
-            <div
-              onClick={() => setReading(null)}
-              style={{
-                position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                zIndex: 100, padding: "24px",
-              }}
-            >
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  background: "#0d1320", border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: "12px", padding: "24px", maxWidth: "700px", width: "100%",
-                  maxHeight: "80vh", overflowY: "auto",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <div style={{ ...label, color: "#6a8ccc" }}>Session {reading.id.slice(0, 8)}...</div>
-                  <button onClick={() => setReading(null)} style={btn}>close</button>
-                </div>
-                {reading.messages.map((m, i) => (
-                  <div key={i} style={{
-                    marginBottom: "12px",
-                    paddingLeft: m.role === "user" ? "0" : "20px",
-                    borderLeft: m.role === "assistant" ? "2px solid rgba(106,140,204,0.3)" : "none",
-                  }}>
-                    <div style={{ fontSize: "10px", color: m.role === "user" ? "#8a9ab5" : "#6a8ccc", marginBottom: "2px", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                      {m.role} — {timeAgo(m.createdAt)}
-                    </div>
-                    <div style={{ color: "#c8d0e0", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>{m.content}</div>
-                  </div>
-                ))}
-                {reading.messages.length === 0 && (
-                  <div style={{ color: "#556" }}>no messages</div>
-                )}
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>

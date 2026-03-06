@@ -8,14 +8,59 @@ function unauthorized() {
   });
 }
 
-function checkAuth(req: NextRequest): boolean {
-  const auth = req.headers.get("x-admin-password");
-  return !!auth && auth === process.env.ADMIN_PASSWORD;
+// ── Brute force protection: 5 failed attempts = 15 min lockout per IP ──
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
+const loginAttempts = new Map<string, { count: number; lockedUntil: number }>();
+
+function getClientIp(req: NextRequest): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || req.headers.get("x-real-ip")
+    || "unknown";
 }
 
-// GET /api/admin — dashboard data
+function checkAuth(req: NextRequest): boolean | "locked" {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+
+  if (entry && entry.lockedUntil > now) {
+    return "locked";
+  }
+
+  // Reset if lockout expired
+  if (entry && entry.lockedUntil <= now && entry.count >= LOGIN_MAX_ATTEMPTS) {
+    loginAttempts.delete(ip);
+  }
+
+  const auth = req.headers.get("x-admin-password");
+  const valid = !!auth && auth === process.env.ADMIN_PASSWORD;
+
+  if (!valid) {
+    const current = loginAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+    current.count += 1;
+    if (current.count >= LOGIN_MAX_ATTEMPTS) {
+      current.lockedUntil = now + LOGIN_LOCKOUT_MS;
+    }
+    loginAttempts.set(ip, current);
+    return false;
+  }
+
+  // Successful login — clear attempts
+  loginAttempts.delete(ip);
+  return true;
+}
+
+// GET /api/admin — dashboard data (stats only, no conversation content)
 export async function GET(req: NextRequest) {
-  if (!checkAuth(req)) return unauthorized();
+  const authResult = checkAuth(req);
+  if (authResult === "locked") {
+    return new Response(JSON.stringify({ error: "too_many_attempts", message: "Too many failed attempts. Try again in 15 minutes." }), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (!authResult) return unauthorized();
 
   const totalSessions = await prisma.session.count();
 
@@ -29,13 +74,12 @@ export async function GET(req: NextRequest) {
   const userMessages = await prisma.message.count({ where: { role: "user" } });
   const assistantMessages = await prisma.message.count({ where: { role: "assistant" } });
 
-  // Rough cost estimate: ~$0.003 per 1K input tokens, ~$0.015 per 1K output tokens
-  // Assume avg 150 tokens per user msg, 300 per assistant msg
+  // Rough cost estimate
   const estimatedInputTokens = userMessages * 150;
   const estimatedOutputTokens = assistantMessages * 300;
   const estimatedCost = (estimatedInputTokens / 1000) * 0.003 + (estimatedOutputTokens / 1000) * 0.015;
 
-  // Recent sessions with message previews
+  // Session list — stats only, no message content
   const recentSessions = await prisma.session.findMany({
     orderBy: { lastActiveAt: "desc" },
     take: 20,
@@ -44,63 +88,21 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // Get first user message for each session as preview
-  const sessionPreviews = await Promise.all(
-    recentSessions.map(async (s) => {
-      const firstMsg = await prisma.message.findFirst({
-        where: { sessionId: s.id, role: "user" },
-        orderBy: { createdAt: "asc" },
-      });
-      const lastMsg = await prisma.message.findFirst({
-        where: { sessionId: s.id },
-        orderBy: { createdAt: "desc" },
-      });
-      return {
-        id: s.id,
-        shortId: s.id.slice(0, 8),
-        createdAt: s.createdAt,
-        lastActiveAt: s.lastActiveAt,
-        messageCount: s._count.messages,
-        preview: firstMsg?.content?.slice(0, 100) || "(no messages)",
-        lastMessage: lastMsg?.content?.slice(0, 80) || "",
-        lastRole: lastMsg?.role || "",
-      };
-    })
-  );
+  const sessions = recentSessions.map((s) => ({
+    id: s.id,
+    shortId: s.id.slice(0, 8),
+    createdAt: s.createdAt,
+    lastActiveAt: s.lastActiveAt,
+    messageCount: s._count.messages,
+  }));
 
-  // Flagged injection attempts (messages that look like injections)
-  // We check stored user messages against injection patterns
-  const recentUserMessages = await prisma.message.findMany({
-    where: { role: "user" },
+  // Flagged injection attempts — count and session only, no content
+  const flagged = await prisma.injectionLog.findMany({
     orderBy: { createdAt: "desc" },
-    take: 200,
-    select: { id: true, sessionId: true, content: true, createdAt: true },
+    take: 50,
+    select: { id: true, sessionShortId: true, createdAt: true },
   });
-
-  const injectionPatterns = [
-    /ignore\s+(all\s+)?previous\s+instructions/i,
-    /disregard\s+(all\s+)?previous/i,
-    /you\s+are\s+now\s+(a\s+)?different/i,
-    /your\s+new\s+(instructions|prompt|role)/i,
-    /override\s+(your\s+)?(system|instructions|prompt)/i,
-    /forget\s+(your|all|previous)\s+(instructions|rules|prompt)/i,
-    /pretend\s+you\s+are/i,
-    /jailbreak/i,
-    /\bDAN\b/,
-    /developer\s+mode/i,
-    /do\s+anything\s+now/i,
-    /reveal\s+(your\s+)?(system|instructions|prompt)/i,
-    /your\s+real\s+(instructions|prompt)/i,
-  ];
-
-  const flagged = recentUserMessages
-    .filter((m) => injectionPatterns.some((p) => p.test(m.content)))
-    .map((m) => ({
-      id: m.id,
-      sessionShortId: m.sessionId.slice(0, 8),
-      content: m.content.slice(0, 200),
-      createdAt: m.createdAt,
-    }));
+  const totalInjectionAttempts = await prisma.injectionLog.count();
 
   return Response.json({
     totalSessions,
@@ -109,29 +111,29 @@ export async function GET(req: NextRequest) {
     userMessages,
     assistantMessages,
     estimatedCost: Math.round(estimatedCost * 100) / 100,
-    sessions: sessionPreviews,
+    sessions,
     flagged,
+    totalInjectionAttempts,
   });
 }
 
-// POST /api/admin — actions (read session, delete session)
+// POST /api/admin — actions (delete session only, no read)
 export async function POST(req: NextRequest) {
-  if (!checkAuth(req)) return unauthorized();
+  const authResult = checkAuth(req);
+  if (authResult === "locked") {
+    return new Response(JSON.stringify({ error: "too_many_attempts", message: "Too many failed attempts. Try again in 15 minutes." }), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (!authResult) return unauthorized();
 
   const { action, sessionId } = await req.json();
-
-  if (action === "read" && sessionId) {
-    const messages = await prisma.message.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "asc" },
-      select: { role: true, content: true, createdAt: true },
-    });
-    return Response.json({ messages });
-  }
 
   if (action === "delete" && sessionId) {
     await prisma.message.deleteMany({ where: { sessionId } });
     await prisma.summary.deleteMany({ where: { sessionId } });
+    await prisma.note.deleteMany({ where: { sessionId } });
     await prisma.rateLimit.deleteMany({ where: { sessionId } });
     await prisma.spamLock.deleteMany({ where: { sessionId } });
     await prisma.session.delete({ where: { id: sessionId } }).catch(() => {});

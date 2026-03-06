@@ -8,10 +8,12 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { findSimilarSession, upsertSummary, detectAndCreateNote, findRelevantNotes, extractUserName, checkReturningUser } from "@/lib/memory";
 import type { ReturningUserResult } from "@/lib/memory";
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error("ANTHROPIC_API_KEY is not set — add it to .env.local");
+function getAnthropic() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is not set — add it to .env.local");
+  }
+  return new Anthropic();
 }
-const anthropic = new Anthropic();
 
 type DbMessage = {
   role: string;
@@ -550,7 +552,7 @@ Because you carry memory, sometimes someone comes back. When a name you've heard
       content: buildContent(m),
     }));
 
-    const stream = await anthropic.messages.stream({
+    const stream = await getAnthropic().messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 1024,
       system: systemPrompt,

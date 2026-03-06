@@ -2,10 +2,16 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "./db";
 import { encrypt, decrypt } from "./crypto";
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error("ANTHROPIC_API_KEY is not set — add it to .env.local");
+let _anthropic: Anthropic | null = null;
+function getAnthropic() {
+  if (!_anthropic) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error("ANTHROPIC_API_KEY is not set — add it to .env.local");
+    }
+    _anthropic = new Anthropic();
+  }
+  return _anthropic;
 }
-const anthropic = new Anthropic();
 
 // Find the most emotionally similar past session to the current conversation
 export async function findSimilarSession(
@@ -29,7 +35,7 @@ export async function findSimilarSession(
     .map((s) => `Session ${s.sessionId}:\n${decrypt(s.content)}\nThemes: ${decrypt(s.themes)}`)
     .join("\n\n---\n\n");
 
-  const response = await anthropic.messages.create({
+  const response = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 100,
     messages: [
@@ -59,7 +65,7 @@ export async function detectAndCreateNote(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const response = await anthropic.messages.create({
+  const response = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 300,
     messages: [
@@ -129,7 +135,7 @@ export async function findRelevantNotes(
     .map((n, i) => `Note ${i}: by "${decrypt(n.authorName)}" — "${decrypt(n.content)}" [tags: ${decrypt(n.emotionalTags)}]`)
     .join("\n");
 
-  const response = await anthropic.messages.create({
+  const response = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 100,
     messages: [
@@ -165,7 +171,7 @@ export async function extractUserName(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const response = await anthropic.messages.create({
+  const response = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 50,
     messages: [
@@ -225,7 +231,7 @@ export async function checkReturningUser(
     .map((s) => `Session from ${s.updatedAt.toISOString()}:\n${decrypt(s.content)}\nThemes: ${decrypt(s.themes)}`)
     .join("\n---\n");
 
-  const response = await anthropic.messages.create({
+  const response = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 100,
     messages: [
@@ -284,7 +290,7 @@ export async function upsertSummary(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const response = await anthropic.messages.create({
+  const response = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 300,
     messages: [

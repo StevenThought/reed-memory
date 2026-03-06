@@ -406,7 +406,8 @@ export async function POST(req: NextRequest) {
     });
 
     // Decrypt all message content and image data — skip messages that fail decryption
-    const dbMessages = dbMessagesRaw.flatMap((m: (typeof dbMessagesRaw)[number]) => {
+    type DbMessage = (typeof dbMessagesRaw)[number];
+    const dbMessages: DbMessage[] = dbMessagesRaw.flatMap((m: DbMessage) => {
       try {
         return [{
           ...m,

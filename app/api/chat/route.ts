@@ -2,9 +2,8 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import sanitize from "sanitize-html";
 import { prisma } from "@/lib/db";
-import { PrismaClient } from "@prisma/client";
 
-type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+type TransactionClient = Parameters<Extract<Parameters<typeof prisma.$transaction>[0], (...args: any[]) => any>>[0];
 import { encrypt, decrypt } from "@/lib/crypto";
 import { findSimilarSession, upsertSummary, detectAndCreateNote, findRelevantNotes, extractUserName, checkReturningUser } from "@/lib/memory";
 import type { ReturningUserResult } from "@/lib/memory";

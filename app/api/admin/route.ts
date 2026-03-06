@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { Prisma } from "@prisma/client";
 import { validateSession, getClientIp, auditLog } from "@/lib/admin-auth";
 
 function unauthorized() {
@@ -40,7 +39,7 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  const sessions = recentSessions.map((s: Prisma.SessionGetPayload<{ include: { _count: { select: { messages: true } } } }>) => ({
+  const sessions = recentSessions.map((s: (typeof recentSessions)[number]) => ({
     id: s.id,
     shortId: s.id.slice(0, 8),
     createdAt: s.createdAt,

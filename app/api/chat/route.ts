@@ -2,6 +2,9 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import sanitize from "sanitize-html";
 import { prisma } from "@/lib/db";
+import { PrismaClient } from "@prisma/client";
+
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 import { encrypt, decrypt } from "@/lib/crypto";
 import { findSimilarSession, upsertSummary, detectAndCreateNote, findRelevantNotes, extractUserName, checkReturningUser } from "@/lib/memory";
 import type { ReturningUserResult } from "@/lib/memory";
@@ -113,7 +116,7 @@ function getClientIp(req: NextRequest): string {
 async function checkIpRateLimit(ip: string): Promise<{ allowed: boolean; resetsAt?: Date }> {
   const now = new Date();
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: TransactionClient) => {
     const entry = await tx.ipRateLimit.findUnique({ where: { ip } });
 
     if (!entry || now.getTime() - entry.windowStart.getTime() > IP_RATE_WINDOW_MS) {
@@ -239,7 +242,7 @@ export async function POST(req: NextRequest) {
     const SPAM_LOCKOUT_MS = 10 * 60 * 1000;
 
     // Spam lock check inside a transaction to prevent race conditions
-    const spamResult = await prisma.$transaction(async (tx) => {
+    const spamResult = await prisma.$transaction(async (tx: TransactionClient) => {
       const existingLock = await tx.spamLock.findUnique({ where: { sessionId } });
       if (existingLock) {
         if (now.getTime() < existingLock.expiresAt.getTime()) {
@@ -316,7 +319,7 @@ export async function POST(req: NextRequest) {
     const RATE_LIMIT = 100;
     const WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-    const rateLimitResult = await prisma.$transaction(async (tx) => {
+    const rateLimitResult = await prisma.$transaction(async (tx: TransactionClient) => {
       const rl = await tx.rateLimit.findUnique({ where: { sessionId } });
 
       if (rl) {

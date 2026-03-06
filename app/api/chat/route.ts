@@ -84,9 +84,13 @@ const IP_RATE_WINDOW_MS = 4 * 60 * 60 * 1000;
 const ipRateMap = new Map<string, { count: number; windowStart: number }>();
 
 function getClientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    || req.headers.get("x-real-ip")
-    || "unknown";
+  // Use the rightmost IP in x-forwarded-for — it's the one added by the trusted proxy
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const ips = forwarded.split(",").map((s) => s.trim()).filter(Boolean);
+    return ips[ips.length - 1] || "unknown";
+  }
+  return req.headers.get("x-real-ip") || "unknown";
 }
 
 function checkIpRateLimit(ip: string): { allowed: boolean; resetsAt?: Date } {
@@ -122,6 +126,23 @@ export async function POST(req: NextRequest) {
         return new Response(
           JSON.stringify({ error: "image_too_large", message: "Image must be under 10MB." }),
           { status: 413, headers: { "Content-Type": "application/json" } },
+        );
+      }
+    }
+
+    // ── Validate image MIME type matches actual content ──
+    if (imageData && typeof imageData === "string" && imageMimeType) {
+      const MIME_SIGNATURES: Record<string, string[]> = {
+        "image/jpeg": ["/9j/"],
+        "image/png": ["iVBOR"],
+        "image/gif": ["R0lG"],
+        "image/webp": ["UklG"],
+      };
+      const allowed = MIME_SIGNATURES[imageMimeType];
+      if (!allowed || !allowed.some((sig) => imageData.startsWith(sig))) {
+        return new Response(
+          JSON.stringify({ error: "invalid_image", message: "Image content does not match declared type." }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
     }
@@ -197,57 +218,41 @@ export async function POST(req: NextRequest) {
     const SPAM_WINDOW_MS = 30 * 1000;
     const SPAM_LOCKOUT_MS = 10 * 60 * 1000;
 
-    const existingLock = await prisma.spamLock.findUnique({ where: { sessionId } });
-    if (existingLock) {
-      if (now.getTime() < existingLock.expiresAt.getTime()) {
-        // still locked out
-        const enc = new TextEncoder();
-        const readable = new ReadableStream({
-          start(controller) {
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "spam_locked", expiresAt: existingLock.expiresAt.toISOString() })}\n\n`));
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
-            controller.close();
-          },
-        });
-        return new Response(readable, {
-          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
-        });
-      } else {
-        // lock expired — delete it and send the comeback message
-        await prisma.spamLock.delete({ where: { sessionId } });
-        const comeback = "are you ready to talk or just want to spam more? because I will time you out again.";
-        await prisma.message.create({ data: { sessionId, role: "assistant", content: encrypt(comeback) } });
-        const enc = new TextEncoder();
-        const readable = new ReadableStream({
-          start(controller) {
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "spam_unlocked" })}\n\n`));
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "text", text: comeback })}\n\n`));
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
-            controller.close();
-          },
-        });
-        return new Response(readable, {
-          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
-        });
+    // Spam lock check inside a transaction to prevent race conditions
+    const spamResult = await prisma.$transaction(async (tx) => {
+      const existingLock = await tx.spamLock.findUnique({ where: { sessionId } });
+      if (existingLock) {
+        if (now.getTime() < existingLock.expiresAt.getTime()) {
+          return { action: "locked" as const, expiresAt: existingLock.expiresAt };
+        } else {
+          await tx.spamLock.delete({ where: { sessionId } });
+          const comeback = "are you ready to talk or just want to spam more? because I will time you out again.";
+          await tx.message.create({ data: { sessionId, role: "assistant", content: encrypt(comeback) } });
+          return { action: "unlocked" as const, comeback };
+        }
       }
-    }
 
-    // Check for spam burst: 5+ messages in 30 seconds
-    const spamWindowStart = new Date(now.getTime() - SPAM_WINDOW_MS);
-    const recentMsgCount = await prisma.message.count({
-      where: { sessionId, role: "user", createdAt: { gte: spamWindowStart } },
+      const spamWindowStart = new Date(now.getTime() - SPAM_WINDOW_MS);
+      const recentMsgCount = await tx.message.count({
+        where: { sessionId, role: "user", createdAt: { gte: spamWindowStart } },
+      });
+
+      if (recentMsgCount >= SPAM_THRESHOLD) {
+        const expiresAt = new Date(now.getTime() + SPAM_LOCKOUT_MS);
+        await tx.spamLock.create({ data: { sessionId, expiresAt } });
+        const spamReply = "are you trying to run up a massive token bill or something? stop. if you're not actually trying to talk to me just close the tab, go play a video game, take a walk. come back when you have something to say.";
+        await tx.message.create({ data: { sessionId, role: "assistant", content: encrypt(spamReply) } });
+        return { action: "spam_triggered" as const, expiresAt, spamReply };
+      }
+
+      return { action: "ok" as const };
     });
 
-    if (recentMsgCount >= SPAM_THRESHOLD) {
-      const expiresAt = new Date(now.getTime() + SPAM_LOCKOUT_MS);
-      await prisma.spamLock.create({ data: { sessionId, expiresAt } });
-      const spamReply = "are you trying to run up a massive token bill or something? stop. if you're not actually trying to talk to me just close the tab, go play a video game, take a walk. come back when you have something to say.";
-      await prisma.message.create({ data: { sessionId, role: "assistant", content: encrypt(spamReply) } });
+    if (spamResult.action === "locked") {
       const enc = new TextEncoder();
       const readable = new ReadableStream({
         start(controller) {
-          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "text", text: spamReply })}\n\n`));
-          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "spam_locked", expiresAt: expiresAt.toISOString() })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "spam_locked", expiresAt: spamResult.expiresAt.toISOString() })}\n\n`));
           controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
           controller.close();
         },
@@ -257,47 +262,74 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ── Rate limiting: 100 messages per 4 hours ──
+    if (spamResult.action === "unlocked") {
+      const enc = new TextEncoder();
+      const readable = new ReadableStream({
+        start(controller) {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "spam_unlocked" })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "text", text: spamResult.comeback })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
+          controller.close();
+        },
+      });
+      return new Response(readable, {
+        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+      });
+    }
+
+    if (spamResult.action === "spam_triggered") {
+      const enc = new TextEncoder();
+      const readable = new ReadableStream({
+        start(controller) {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "text", text: spamResult.spamReply })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "spam_locked", expiresAt: spamResult.expiresAt.toISOString() })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
+          controller.close();
+        },
+      });
+      return new Response(readable, {
+        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+      });
+    }
+
+    // ── Rate limiting: 100 messages per 4 hours (transactional) ──
     const RATE_LIMIT = 100;
     const WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-    let rateLimit = await prisma.rateLimit.findUnique({
-      where: { sessionId },
+    const rateLimitResult = await prisma.$transaction(async (tx) => {
+      const rl = await tx.rateLimit.findUnique({ where: { sessionId } });
+
+      if (rl) {
+        const elapsed = now.getTime() - rl.windowStart.getTime();
+        if (elapsed > WINDOW_MS) {
+          await tx.rateLimit.update({ where: { sessionId }, data: { count: 1, windowStart: now } });
+          return { action: "ok" as const };
+        } else if (rl.count >= RATE_LIMIT) {
+          const resetsAt = new Date(rl.windowStart.getTime() + WINDOW_MS);
+          return { action: "limited" as const, resetsAt };
+        } else {
+          await tx.rateLimit.update({ where: { sessionId }, data: { count: rl.count + 1 } });
+          return { action: "ok" as const };
+        }
+      } else {
+        await tx.rateLimit.create({ data: { sessionId, count: 1, windowStart: now } });
+        return { action: "ok" as const };
+      }
     });
 
-    if (rateLimit) {
-      const elapsed = now.getTime() - rateLimit.windowStart.getTime();
-      if (elapsed > WINDOW_MS) {
-        // window expired — reset
-        rateLimit = await prisma.rateLimit.update({
-          where: { sessionId },
-          data: { count: 1, windowStart: now },
-        });
-      } else if (rateLimit.count >= RATE_LIMIT) {
-        // hit the limit — send Reed's farewell
-        const resetsAt = new Date(rateLimit.windowStart.getTime() + WINDOW_MS);
-        const enc = new TextEncoder();
-        const farewell = "alright, so steven thought added some security thing so he wouldn't get destroyed on his bank account for tokens — so that's your 100 messages for the next 4 hours. talk soon though. before you go just tell me your name if you haven't, I'll remember you.";
-        const readable = new ReadableStream({
-          start(controller) {
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "text", text: farewell })}\n\n`));
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "rate_limited", resetsAt: resetsAt.toISOString() })}\n\n`));
-            controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
-            controller.close();
-          },
-        });
-        return new Response(readable, {
-          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
-        });
-      } else {
-        rateLimit = await prisma.rateLimit.update({
-          where: { sessionId },
-          data: { count: rateLimit.count + 1 },
-        });
-      }
-    } else {
-      rateLimit = await prisma.rateLimit.create({
-        data: { sessionId, count: 1, windowStart: now },
+    if (rateLimitResult.action === "limited") {
+      const enc = new TextEncoder();
+      const farewell = "alright, so steven thought added some security thing so he wouldn't get destroyed on his bank account for tokens — so that's your 100 messages for the next 4 hours. talk soon though. before you go just tell me your name if you haven't, I'll remember you.";
+      const readable = new ReadableStream({
+        start(controller) {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "text", text: farewell })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "rate_limited", resetsAt: rateLimitResult.resetsAt.toISOString() })}\n\n`));
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
+          controller.close();
+        },
+      });
+      return new Response(readable, {
+        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
       });
     }
 
@@ -317,7 +349,7 @@ export async function POST(req: NextRequest) {
       await prisma.injectionLog.create({
         data: {
           sessionShortId: sessionId.slice(0, 8),
-          content: cleanMessage.slice(0, 200),
+          content: encrypt(cleanMessage.slice(0, 200)),
         },
       });
 
@@ -391,7 +423,7 @@ export async function POST(req: NextRequest) {
         const pastSummary = await prisma.summary.findUnique({
           where: { sessionId: similarSessionId },
         });
-        if (pastSummary) memoryContext = pastSummary.content;
+        if (pastSummary) memoryContext = decrypt(pastSummary.content);
       }
 
       relevantNotes = notes;
@@ -518,10 +550,10 @@ Because you carry memory, sometimes someone comes back. When a name you've heard
             upsertSummary(
               sessionId,
               allMessagesRaw.map((m) => ({ role: m.role, content: decrypt(m.content) }))
-            ).catch(console.error);
+            ).catch(() => {});
           }
         } catch (err) {
-          console.error("Stream error:", err);
+          console.error("Stream error:", err instanceof Error ? err.message : "unknown");
           controller.enqueue(
             enc.encode(
               `data: ${JSON.stringify({ type: "error", message: "Stream failed" })}\n\n`
@@ -544,8 +576,8 @@ Because you carry memory, sometimes someone comes back. When a name you've heard
       },
     });
   } catch (err) {
-    console.error("Route error:", err);
-    return new Response(JSON.stringify({ error: String(err) }), {
+    console.error("Route error:", err instanceof Error ? err.message : "unknown");
+    return new Response(JSON.stringify({ error: "something went wrong" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

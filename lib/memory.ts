@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "./db";
+import { encrypt, decrypt } from "./crypto";
 
 if (!process.env.ANTHROPIC_API_KEY) {
   throw new Error("ANTHROPIC_API_KEY is not set — add it to .env.local");
@@ -25,7 +26,7 @@ export async function findSimilarSession(
     .join("\n");
 
   const summaryList = pastSummaries
-    .map((s) => `Session ${s.sessionId}:\n${s.content}\nThemes: ${s.themes}`)
+    .map((s) => `Session ${s.sessionId}:\n${decrypt(s.content)}\nThemes: ${s.themes}`)
     .join("\n\n---\n\n");
 
   const response = await anthropic.messages.create({
@@ -101,7 +102,7 @@ ${convoText}`,
   const emotionalTags = tagsMatch ? tagsMatch[1].trim() : "[]";
 
   await prisma.note.create({
-    data: { sessionId, authorName, content, emotionalTags },
+    data: { sessionId, authorName: encrypt(authorName), content: encrypt(content), emotionalTags },
   });
 
   return { created: true, authorName, content };
@@ -125,7 +126,7 @@ export async function findRelevantNotes(
     .join("\n");
 
   const noteList = allNotes
-    .map((n, i) => `Note ${i}: by "${n.authorName}" — "${n.content}" [tags: ${n.emotionalTags}]`)
+    .map((n, i) => `Note ${i}: by "${decrypt(n.authorName)}" — "${decrypt(n.content)}" [tags: ${n.emotionalTags}]`)
     .join("\n");
 
   const response = await anthropic.messages.create({
@@ -150,8 +151,8 @@ export async function findRelevantNotes(
     .filter((n) => !isNaN(n) && n >= 0 && n < allNotes.length);
 
   return indices.map((i) => ({
-    authorName: allNotes[i].authorName,
-    content: allNotes[i].content,
+    authorName: decrypt(allNotes[i].authorName),
+    content: decrypt(allNotes[i].content),
     createdAt: allNotes[i].createdAt,
   }));
 }
@@ -208,9 +209,9 @@ export async function checkReturningUser(
     },
   });
 
-  // Filter for case-insensitive name match
+  // Filter for case-insensitive name match (decrypt userName for comparison)
   const matching = pastSummaries.filter(
-    (s) => s.userName?.toLowerCase() === name.toLowerCase()
+    (s) => s.userName && decrypt(s.userName).toLowerCase() === name.toLowerCase()
   );
 
   if (matching.length === 0) return { state: "no_past_sessions" };
@@ -221,7 +222,7 @@ export async function checkReturningUser(
     .join("\n");
 
   const summaryContext = matching
-    .map((s) => `Session from ${s.updatedAt.toISOString()}:\n${s.content}\nThemes: ${s.themes}`)
+    .map((s) => `Session from ${s.updatedAt.toISOString()}:\n${decrypt(s.content)}\nThemes: ${s.themes}`)
     .join("\n---\n");
 
   const response = await anthropic.messages.create({
@@ -264,7 +265,7 @@ Do not explain.`,
     )[0];
     return {
       state: "verified",
-      pastSummary: mostRecent.content,
+      pastSummary: decrypt(mostRecent.content),
       lastSeen: mostRecent.updatedAt,
     };
   }
@@ -315,9 +316,12 @@ ${convoText}`,
     ? nameMatch[1].trim()
     : null;
 
+  const encContent = encrypt(content);
+  const encUserName = userName ? encrypt(userName) : null;
+
   await prisma.summary.upsert({
     where: { sessionId },
-    update: { content, themes, userName },
-    create: { sessionId, content, themes, userName },
+    update: { content: encContent, themes, userName: encUserName },
+    create: { sessionId, content: encContent, themes, userName: encUserName },
   });
 }

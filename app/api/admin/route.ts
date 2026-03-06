@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
+import { timingSafeEqual } from "crypto";
 
 function unauthorized() {
   return new Response(JSON.stringify({ error: "unauthorized" }), {
@@ -8,52 +9,66 @@ function unauthorized() {
   });
 }
 
-// ── Brute force protection: 5 failed attempts = 15 min lockout per IP ──
+// ── Brute force protection: 5 failed attempts = 15 min lockout, tracked in DB ──
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
-const loginAttempts = new Map<string, { count: number; lockedUntil: number }>();
 
 function getClientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    || req.headers.get("x-real-ip")
-    || "unknown";
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const ips = forwarded.split(",").map((s) => s.trim()).filter(Boolean);
+    return ips[ips.length - 1] || "unknown";
+  }
+  return req.headers.get("x-real-ip") || "unknown";
 }
 
-function checkAuth(req: NextRequest): boolean | "locked" {
+async function checkAuth(req: NextRequest): Promise<boolean | "locked"> {
   const ip = getClientIp(req);
-  const now = Date.now();
-  const entry = loginAttempts.get(ip);
+  const now = new Date();
 
-  if (entry && entry.lockedUntil > now) {
+  const entry = await prisma.adminLoginAttempt.findUnique({ where: { ip } });
+
+  if (entry && entry.lockedUntil && entry.lockedUntil > now) {
     return "locked";
   }
 
   // Reset if lockout expired
-  if (entry && entry.lockedUntil <= now && entry.count >= LOGIN_MAX_ATTEMPTS) {
-    loginAttempts.delete(ip);
+  if (entry && entry.lockedUntil && entry.lockedUntil <= now && entry.count >= LOGIN_MAX_ATTEMPTS) {
+    await prisma.adminLoginAttempt.delete({ where: { ip } });
   }
 
   const auth = req.headers.get("x-admin-password");
-  const valid = !!auth && auth === process.env.ADMIN_PASSWORD;
+  const expected = process.env.ADMIN_PASSWORD;
+  let valid = false;
+  if (auth && expected) {
+    const a = Buffer.from(auth);
+    const b = Buffer.from(expected);
+    valid = a.length === b.length && timingSafeEqual(a, b);
+  }
 
   if (!valid) {
-    const current = loginAttempts.get(ip) || { count: 0, lockedUntil: 0 };
-    current.count += 1;
-    if (current.count >= LOGIN_MAX_ATTEMPTS) {
-      current.lockedUntil = now + LOGIN_LOCKOUT_MS;
-    }
-    loginAttempts.set(ip, current);
+    const current = entry && (!entry.lockedUntil || entry.lockedUntil <= now) ? entry : null;
+    const newCount = (current?.count ?? 0) + 1;
+    const lockedUntil = newCount >= LOGIN_MAX_ATTEMPTS ? new Date(now.getTime() + LOGIN_LOCKOUT_MS) : null;
+
+    await prisma.adminLoginAttempt.upsert({
+      where: { ip },
+      update: { count: newCount, lockedUntil },
+      create: { ip, count: newCount, lockedUntil },
+    });
     return false;
   }
 
   // Successful login — clear attempts
-  loginAttempts.delete(ip);
+  if (entry) {
+    await prisma.adminLoginAttempt.delete({ where: { ip } }).catch(() => {});
+  }
   return true;
 }
 
 // GET /api/admin — dashboard data (stats only, no conversation content)
 export async function GET(req: NextRequest) {
-  const authResult = checkAuth(req);
+  const authResult = await checkAuth(req);
   if (authResult === "locked") {
     return new Response(JSON.stringify({ error: "too_many_attempts", message: "Too many failed attempts. Try again in 15 minutes." }), {
       status: 429,
@@ -119,7 +134,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin — actions (delete session only, no read)
 export async function POST(req: NextRequest) {
-  const authResult = checkAuth(req);
+  const authResult = await checkAuth(req);
   if (authResult === "locked") {
     return new Response(JSON.stringify({ error: "too_many_attempts", message: "Too many failed attempts. Try again in 15 minutes." }), {
       status: 429,

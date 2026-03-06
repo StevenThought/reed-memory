@@ -53,6 +53,14 @@ model Summary {
   updatedAt DateTime @updatedAt
 }
 
+model AdminLoginAttempt {
+  id        String    @id @default(cuid())
+  ip        String    @unique
+  count     Int       @default(0)
+  lockedUntil DateTime?
+  updatedAt DateTime  @updatedAt
+}
+
 model InjectionLog {
   id             String   @id @default(cuid())
   sessionShortId String

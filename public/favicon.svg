@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2d4fa1"/>
+      <stop offset="100%" stop-color="#1e3a8a"/>
+    </linearGradient>
+  </defs>
+  <!-- Anatomical heart body -->
+  <path fill="url(#g)" d="
+    M32 58
+    C30 56 8 42 8 26
+    C8 18 14 10 22 10
+    C26 10 28 12 30 14
+    L32 18
+    L34 14
+    C36 12 38 10 42 10
+    C50 10 56 18 56 26
+    C56 42 34 56 32 58Z
+  "/>
+  <!-- Aorta - main vessel top -->
+  <path fill="#1e3a8a" d="
+    M28 14
+    C26 8 22 4 20 2
+    C19 1 18 2 19 4
+    C20 6 24 10 26 14
+    Z
+  "/>
+  <path fill="#2d4fa1" d="
+    M36 14
+    C38 8 42 4 44 2
+    C45 1 46 2 45 4
+    C44 6 40 10 38 14
+    Z
+  "/>
+  <!-- Superior vessels -->
+  <path fill="#1e3a8a" d="
+    M30 12
+    C30 6 32 2 34 1
+    C35 0.5 35.5 1.5 35 3
+    C34 5 32 8 32 12
+    Z
+  "/>
+  <!-- Surface detail lines -->
+  <path fill="none" stroke="#162d6b" stroke-width="0.8" opacity="0.5" d="
+    M24 22 C28 28 28 36 26 44
+    M40 22 C36 28 36 36 38 44
+    M32 20 L32 48
+  "/>
+</svg>

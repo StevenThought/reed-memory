@@ -10,6 +10,14 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Reed",
   description: "An emotionally-aware conversation space",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({

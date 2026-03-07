@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   const res = Response.json({ ok: true });
   res.headers.set(
     "Set-Cookie",
-    `${SESSION_COOKIE_NAME}=${result.signedToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=7200`,
+    `${SESSION_COOKIE_NAME}=${result.signedToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=7200`,
   );
   return res;
 }

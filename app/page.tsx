@@ -351,12 +351,12 @@ export default function ChatPage() {
 
           {/* Top bar */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "40px 40px 0" }}>
-            <span className="breathe" style={{
+            <a className="breathe" href="https://github.com/StevenThought/reed-memory" target="_blank" rel="noopener noreferrer" style={{
               fontSize: "13px", letterSpacing: "0.15em", color: "rgba(255,255,255,0.5)", fontWeight: 600,
-              textTransform: "uppercase", cursor: "default", opacity: 0.5, flex: 1,
+              textTransform: "uppercase", textDecoration: "none", opacity: 0.5, flex: 1,
             }}>
               docs
-            </span>
+            </a>
             <span className="breathe" style={{
               fontSize: "13px", letterSpacing: "0.18em", color: "rgba(255,255,255,0.7)", fontWeight: 700,
               textTransform: "uppercase", textAlign: "center", flex: 1,
